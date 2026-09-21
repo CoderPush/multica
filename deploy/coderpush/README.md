@@ -77,6 +77,11 @@ No human mentions, images, arbitrary webhooks or arbitrary API endpoints are
 supported. Queue content is authored by the authorized Lead, not inferred from
 untrusted issue prose. It must not contain credentials or personal data.
 
+For comment-triggered runs, pass `--parent <trigger-comment-id>` to
+`web-lead-notify`. This is the Multica comment ID, distinct from the Lark
+`--reply-to` message ID. The platform still enforces task-scoped write authority;
+the helper does not infer a parent or retry a failed queue write.
+
 ## Verification record (21 September 2026)
 
 - Twelve sender tests pass, including interrupted sends, receipt-only retries,
