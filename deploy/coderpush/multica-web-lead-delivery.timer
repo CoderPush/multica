@@ -1,0 +1,8 @@
+[Unit]
+Description=Flush CoderPush Web Lead delivery outbox
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=60
+Unit=multica-web-lead-delivery.service
+[Install]
+WantedBy=timers.target
