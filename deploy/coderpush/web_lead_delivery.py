@@ -25,6 +25,10 @@ MILESTONES = {'started', 'preview', 'blocked', 'recovered', 'shipped', 'decision
 UTC = dt.timezone.utc
 
 
+class MissingLarkSecretConfiguration(RuntimeError):
+    """Safe deployment diagnostic, including in error-type-only sweep logs."""
+
+
 def now():
     return dt.datetime.now(UTC).isoformat()
 
@@ -82,6 +86,8 @@ class Lark:
         # Docker output stays in memory; never print environment or credentials.
         env = json.loads(command(['docker', 'inspect', 'multica-backend-1', '--format', '{{json .Config.Env}}']))
         values = dict(entry.split('=', 1) for entry in env)
+        if not values.get('MULTICA_LARK_SECRET_KEY'):
+            raise MissingLarkSecretConfiguration('Missing deployment secret configuration: MULTICA_LARK_SECRET_KEY')
         key = base64.b64decode(values['MULTICA_LARK_SECRET_KEY'])
         sealed = base64.b64decode(config['app_secret_encrypted'])
         secret = AESGCM(key).decrypt(sealed[:12], sealed[12:], None).decode()

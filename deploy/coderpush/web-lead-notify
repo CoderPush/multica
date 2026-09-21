@@ -23,7 +23,15 @@ if not 1 <= len(body.strip()) <= 2400 or '<at' in body or '![' in body:
     p.error('Use 1-2400 characters of text/Markdown without mentions or images.')
 if not re.fullmatch(r'om_[A-Za-z0-9_]{8,100}', a.reply_to):
     p.error('Invalid originating Lark message ID.')
-issue = json.loads(subprocess.check_output(['multica','issue','get',a.issue,'--output','json']))
+try:
+    issue_output = subprocess.check_output(
+        ['multica','issue','get',a.issue,'--output','json'], stderr=subprocess.PIPE)
+except (subprocess.CalledProcessError, OSError):
+    p.error('Could not read the issue. Check Multica access and the issue ID; no update was queued.')
+try:
+    issue = json.loads(issue_output)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    p.error('Multica returned invalid issue JSON; no update was queued.')
 if issue['project_id'] != PROJECT or issue['workspace_id'] != WORKSPACE:
     p.error('Only CoderPush Web issues are supported.')
 # Task-scoped API still authorizes this write. The sender separately verifies
