@@ -84,7 +84,8 @@ the helper does not infer a parent or retry a failed queue write.
 
 ## Verification record (21 September 2026)
 
-- Twelve sender tests pass, including interrupted sends, receipt-only retries,
+- Thirteen sender/helper tests pass, including comment-parent passthrough,
+  interrupted sends, receipt-only retries,
   malformed-origin isolation, copied inbound provenance and superseded receipts.
 - Independent bounded review found and corrected two recovery defects and one
   copied-provenance defect. Full CE orchestration was not executed.
@@ -93,5 +94,15 @@ the helper does not infer a parent or retry a failed queue write.
   The operator independently read that message through the user Lark CLI.
 - Task-local skill access and session recording now work. Actual Hogan daemon
   browser validation remains blocked by Chromium SIGILL; the same Codex CLI,
-  workspace and browser succeed through SSH. PR194 remains held. A SessionCreate experiment was rejected by launchd and is excluded from
-  these changes; restoration uses the original service configuration.
+  workspace and browser succeed through SSH. A SessionCreate experiment was
+  rejected by launchd and rolled back to the original service configuration.
+- PR #194 subsequently shipped at `b992f2863ad961d9ca899f4ae38053d3ec8442ae`
+  after operator desktop/mobile evidence and Code Reviewer review. Production
+  verification passed in CoderPush/web Actions run `35620145710`. The daemon
+  browser failure is not a release blocker when equivalent verified browser
+  evidence is available.
+- The comment-triggered shipped update used request
+  `01a0c4a5-6fe4-75ca-ab06-b7dc3e005449`, delivered as
+  `om_x100b64215be738a0e0efac7e2f16a81`, and was independently read in Lark.
+  CLP-48 is Done. The helper must receive the triggering Multica parent ID in
+  comment-triggered runs; that ID is unrelated to the Lark reply target.
