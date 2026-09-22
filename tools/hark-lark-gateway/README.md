@@ -78,7 +78,7 @@ or old PR operations. Other OpenClaw bots and Multica workspaces remain unchange
 
 This source alone is not evidence of deployment or a successful Lark round trip.
 
-## Production observer pilot
+## Legacy production observer (disabled)
 
 Set `releaseObserver: true` in the private configuration to enable a five-minute
 observer in the existing gateway process. It uses Hogan's existing `gh` login
@@ -110,3 +110,43 @@ gateway stopped to collect a baseline without sending the outbox. This mode
 updates observer state and may queue a problem notice; it does not send it.
 Disable the observer flag and restart the gateway to roll back just the observer.
 Preserve `observer.sqlite` and reconcile held outbox entries before replaying.
+
+## Hourly Multica Autopilot
+
+The current rollout keeps `releaseObserver: false`. A native Multica **Run only**
+Autopilot assigns Hark Release Watch on Hogan once per hour. It does not create
+issues or invite teammates. The separate chat agent retains no execution tools.
+
+`release-mcp.mjs` exposes three fixed-scope tools: discover newly merged main PRs,
+inspect queued release evidence, and finish a check with an optional message to
+the fixed alerts group. The server owns GitHub GET requests, bounded public HTML
+reads, and Lark credentials. No arbitrary command, repository, URL or recipient
+is accepted from the model. Keep shell, browser, apps and other MCP servers off.
+The Codex tool host must be enabled for MCP calls; only these three tools should
+be preauthorized for unattended execution. Test the effective runtime settings,
+not just the saved agent configuration.
+
+The private `releases.sqlite` database establishes a start-time baseline, retains
+unfinished checks, and avoids replaying completed PRs. Discovery overlaps one day
+for GitHub indexing and rejects a backlog over 100 results. Each run handles up
+to five least-recently-inspected items. It inspects at most 100 changed files;
+truncation is reported, never treated as a complete code audit. Deployment evidence
+must include the merge commit before public checks can complete the item.
+
+The runbook requests alerts only for concrete findings, material clarifications,
+stalled deployments and recoveries. Healthy releases stay quiet. Reports include
+their verification time and coverage limits. Delivery uses a durable UUID; an
+uncertain attempt older than 50 minutes requires operator reconciliation. This
+can leave a queued item pending rather than risking a duplicate message.
+
+Vercel production status comes through GitHub. Vercel runtime logs, visual or
+interactive flows, database migrations and payment verification are not covered.
+Hogan must be online and its GitHub/Codex authentication usable. A completed
+Multica task is not itself proof that tools ran; inspect its result and the stored
+evidence/receipt. Tool failures retain pending work for a later run.
+
+To commission, run `release-mcp.mjs --baseline` with the private config, optionally
+queue one explicitly approved historical PR with `--seed-test NUMBER`, then run
+the Autopilot manually and verify its actual Lark receipt. After that, enable its
+hourly schedule. Pause the Autopilot to stop release checks; the chat gateway stays
+running. Preserve the ledger when changing schedules or restarting Hogan.

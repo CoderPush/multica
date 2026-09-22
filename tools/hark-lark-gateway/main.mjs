@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import * as lark from '@larksuiteoapi/node-sdk';
 import { accept, acquireProcessLock, Gateway, Ledger } from './gateway.mjs';
 import { Observer, ALERTS, REPO } from './observer.mjs';
+import { releaseContext } from './releases.mjs';
 
 const fatal = () => { console.error('Hark gateway stopped; operator inspection required.'); process.exit(1); };
 process.on('uncaughtException', fatal);
@@ -47,7 +48,7 @@ const reply = async (messageID, content, uuid) => {
   return result.data?.message_id;
 };
 const gateway = new Gateway({ ledger, api, reply, agentID: config.agentID, log,
-  observerContext: () => observer?.context() ?? '' });
+  observerContext: () => observer?.context() ?? releaseContext(path.join(config.stateDir,'releases.sqlite')) });
 const run = promisify(execFile);
 const observer = config.releaseObserver === true ? new Observer({
   file: path.join(config.stateDir, 'observer.sqlite'), log,
