@@ -77,3 +77,36 @@ Keep the gateway ledger for reconciliation. Do not replay uncertain model reques
 or old PR operations. Other OpenClaw bots and Multica workspaces remain unchanged.
 
 This source alone is not evidence of deployment or a successful Lark round trip.
+
+## Production observer pilot
+
+Set `releaseObserver: true` in the private configuration to enable a five-minute
+observer in the existing gateway process. It uses Hogan's existing `gh` login
+with fixed GET requests to `EO-Vietnam/eo-vietnam`. Vercel's production deployment
+statuses arrive through GitHub; no Vercel token or browser session is required.
+The installed `gh` executable is `/Users/hogan/.local/bin/gh`.
+
+The first run establishes a quiet baseline for `/`, `/blog`, and `/events`.
+Subsequent deployments also check up to 12 static public page routes in the
+GitHub comparison from the previously observed deployment. New article routes
+are checked for a direct link in `/blog`. Dynamic routes, content-only data
+changes without a page file, visual layout, images, logged-in flows, payments,
+and database migrations are outside this pilot's verification coverage.
+
+Confirmed HTTP failures (two consecutive observations), Vercel deployment failures,
+and recoveries go only to the approved `eovietnam.org alerts` group. Unresolved
+pages stay in the check set across unrelated deployments before recovery is claimed.
+Healthy deployments stay quiet because the repository already posts those.
+The durable outbox retries with one UUID for under 50 minutes after its first
+send attempt and rotates pending rows fairly; older uncertain
+sends are held for operator reconciliation. No GitHub or production writes occur.
+The latest timestamped evidence is captured when a queued Lark chat is submitted;
+Hark must identify snapshots older than 15 minutes as stale. Read failures leave
+the old timestamp intact and record a sanitized operator log. There is no external
+uptime monitor for Hogan or the gateway process in this pilot.
+
+Run `node main.mjs --check-observer` with the normal private config and the live
+gateway stopped to collect a baseline without sending the outbox. This mode
+updates observer state and may queue a problem notice; it does not send it.
+Disable the observer flag and restart the gateway to roll back just the observer.
+Preserve `observer.sqlite` and reconcile held outbox entries before replaying.

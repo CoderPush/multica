@@ -1,1 +1,1 @@
-{"name":"hark-lark-gateway","private":true,"type":"module","engines":{"node":">=24"},"scripts":{"test":"node --test gateway.test.mjs","start":"node main.mjs"},"dependencies":{"@larksuiteoapi/node-sdk":"1.74.0"}}
+{"name":"hark-lark-gateway","private":true,"type":"module","engines":{"node":">=24"},"scripts":{"test":"node --test *.test.mjs","start":"node main.mjs"},"dependencies":{"@larksuiteoapi/node-sdk":"1.74.0"}}

@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import * as lark from '@larksuiteoapi/node-sdk';
 import { accept, acquireProcessLock, Gateway, Ledger } from './gateway.mjs';
+import { Observer, ALERTS, REPO } from './observer.mjs';
 
 const fatal = () => { console.error('Hark gateway stopped; operator inspection required.'); process.exit(1); };
 process.on('uncaughtException', fatal);
@@ -43,7 +46,51 @@ const reply = async (messageID, content, uuid) => {
   if (result.code !== 0) throw Error('Lark reply failed');
   return result.data?.message_id;
 };
-const gateway = new Gateway({ ledger, api, reply, agentID: config.agentID, log });
+const gateway = new Gateway({ ledger, api, reply, agentID: config.agentID, log,
+  observerContext: () => observer?.context() ?? '' });
+const run = promisify(execFile);
+const observer = config.releaseObserver === true ? new Observer({
+  file: path.join(config.stateDir, 'observer.sqlite'), log,
+  github: async endpoint => {
+    const { stdout } = await run('/Users/hogan/.local/bin/gh', ['api', '--method', 'GET', `repos/${REPO}/${endpoint}`],
+      { timeout: 25_000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1' } });
+    return JSON.parse(stdout);
+  },
+  read: async url => {
+    for (let redirects = 0; redirects < 4; redirects++) {
+      const u = new URL(url);
+      if (u.protocol !== 'https:' || !['eovietnam.org','www.eovietnam.org'].includes(u.host)) throw Error('Unexpected page host');
+      const response = await fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(20_000) });
+      if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
+        url = new URL(response.headers.get('location'), u).href;
+        await response.body?.cancel(); continue;
+      }
+      if (response.status !== 200 || !response.headers.get('content-type')?.includes('text/html')) {
+        await response.body?.cancel(); throw Error('Unexpected page response');
+      }
+      let body = ''; let bytes = 0;
+      for await (const chunk of response.body) {
+        bytes += chunk.length;
+        if (bytes > 3 * 1024 * 1024) throw Error('Page too large');
+        body += Buffer.from(chunk).toString('utf8');
+      }
+      return body;
+    }
+    throw Error('Too many redirects');
+  },
+  send: async (text, uuid) => {
+    const result = await client.im.v1.message.create({ params: { receive_id_type: 'chat_id' },
+      data: { receive_id: ALERTS, msg_type: 'text', content: JSON.stringify({ text }), uuid } });
+    if (result.code !== 0) throw Error('Lark alert failed');
+    return result.data?.message_id;
+  },
+}) : null;
+if (process.argv.includes('--check-observer')) {
+  if (!observer) throw Error('Observer is disabled');
+  await observer.observe();
+  console.log(JSON.stringify(observer.state()));
+  process.exit(0);
+}
 const ws = new lark.WSClient(base);
 await ws.start({ eventDispatcher: new lark.EventDispatcher({ logger: safeLogger }).register({
   'im.message.receive_v1': async event => {
@@ -53,8 +100,11 @@ await ws.start({ eventDispatcher: new lark.EventDispatcher({ logger: safeLogger 
 }) });
 log('started', { agent: config.agentID, workspace: config.workspaceID });
 const timer = setInterval(() => gateway.tick(), 2000);
+const observerTimer = observer ? setInterval(() => observer.tick(), 5 * 60_000) : null;
+if (observer) void observer.tick();
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   clearInterval(timer);
+  clearInterval(observerTimer);
   // In-flight submissions/replies remain fenced in the durable ledger.
   lock.close();
   process.exit(0);
