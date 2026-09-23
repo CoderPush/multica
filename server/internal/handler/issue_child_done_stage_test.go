@@ -169,19 +169,18 @@ func TestStageAdvanceInstruction(t *testing.T) {
 		if strings.Contains(got, "This was the final stage") {
 			t.Fatalf("must not assert finality when the workflow shape is unknown, got %q", got)
 		}
-		// It must make clear that finishing the stage != the whole issue is
-		// done, and hand both paths (wrap up / create the next stage) to the
-		// leader. The explicit in_review command marks the wrap-up moment;
-		// the write itself is authorized by the standing status-ownership
-		// grant (MUL-6300), not by this ask.
+		// Completion is conditional on acceptance; human review is not automatic.
 		if !strings.Contains(got, "does not mean the whole issue is done") {
 			t.Fatalf("expected stage-done != issue-done framing, got %q", got)
 		}
 		if !strings.Contains(got, "next stage") {
 			t.Fatalf("expected create-next-stage guidance, got %q", got)
 		}
-		if !strings.Contains(got, "multica issue status "+parentID+" in_review") {
-			t.Fatalf("expected explicit in_review instruction for confirmed completion, got %q", got)
+		if !strings.Contains(got, "acceptance and required approvals are satisfied") || !strings.Contains(got, "only for a required human decision") {
+			t.Fatalf("completion must preserve acceptance and real approval gates, got %q", got)
+		}
+		if !strings.Contains(got, "multica issue status "+parentID+" done") {
+			t.Fatalf("expected direct completion instruction when acceptance is met, got %q", got)
 		}
 	})
 }
