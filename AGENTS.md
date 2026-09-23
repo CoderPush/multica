@@ -121,6 +121,8 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 
 ## Change and Delivery Rules
 
+- Keep this repository focused on generally useful product improvements aligned with upstream. Installation-specific runbooks, workspace skills, role/model policy, operator scripts and deployment configuration belong in a separate private operations repository. Do not couple workspace skill releases to product releases.
+
 - Keep changes scoped; reuse existing patterns. Code comments are English.
 - Do not add internal compatibility shims, dual writes, fallback paths, or legacy adapters unless requested. This does not relax API response compatibility above.
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
