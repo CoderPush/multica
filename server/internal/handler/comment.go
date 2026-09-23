@@ -3166,6 +3166,31 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			blockTarget("agent", m.ID, ReasonTargetUnavailable)
 			continue
 		}
+		// An agent coordinator must not start a second delivery run for the
+		// active assignee through another comment thread. Return a refusal,
+		// not "coalesced": the saved comment has not been delivered to that run.
+		// Human messages and mentions of other specialists retain their routing.
+		if authorType == "agent" && authorID != uuidToString(agent.ID) && issue.AssigneeType.String == "agent" && issue.AssigneeID == agent.ID {
+			active, err := h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: agent.ID})
+			if err != nil {
+				blockTarget("agent", m.ID, ReasonInternalError)
+				continue
+			}
+			// Supplements in the existing thread keep their coalescing/replay
+			// contract. Only a separate agent-created handoff is refused.
+			inThread := false
+			if active && opts.ThreadCommentID.Valid {
+				inThread, err = h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, agent.ID, opts.ThreadCommentID)
+				if err != nil {
+					blockTarget("agent", m.ID, ReasonInternalError)
+					continue
+				}
+			}
+			if active && !inThread {
+				blockTarget("agent", m.ID, ReasonAlreadyActive)
+				continue
+			}
+		}
 		// One readiness verdict for every admission path (service.AgentReadiness).
 		// Only a BLOCKED verdict refuses the mention: an unbound agent has no
 		// machine to bring back (MUL-5559), and a machine whose CLI cannot run
