@@ -76,5 +76,5 @@ quiet unless a material finding or action is needed. Existing Multica monitors
 remain in place.
 
 Operator baseline, read-only SQL and cutover receipt are under
-`/Users/qron/.codex/agent-handoff-rollout/`. They hold metadata, not credentials
+`~/.codex/agent-handoff-rollout/`. They hold metadata, not credentials
 or raw issue/comment text in the baseline. Do not commit private snapshots.
