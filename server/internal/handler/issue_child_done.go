@@ -323,9 +323,8 @@ func highestClosedBatchStage(children, completed []db.Issue, isTerminal func(db.
 //
 // `completed` is the representative finished child named in the comment.
 // `staged`/`closedStage` describe the closed barrier (closedStage is unused for
-// an unstaged set). `batch` selects batch-aware wording: a single update keeps
-// its historical byte-identical copy, while a batch that finished several
-// children at once must not claim "the last sub-issue just finished".
+// an unstaged set). `batch` selects batch-aware wording: a single update names
+// its last child; a batch must not claim "the last sub-issue just finished".
 func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool, isTerminal func(db.Issue) bool) {
 	prefix := h.getIssuePrefix(ctx, completed.WorkspaceID)
 	identifier := prefix + "-" + strconv.Itoa(int(completed.Number))
@@ -356,13 +355,13 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	} else {
 		if batch {
 			content = fmt.Sprintf(
-				"%sAll sub-issues are complete — they just finished together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-				mentionPrefix, identifier, childID, title, parentID,
+				"%sAll sub-issues are complete — they just finished together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". %s",
+				mentionPrefix, identifier, childID, title, parentContinuationInstruction(parentID),
 			)
 		} else {
 			content = fmt.Sprintf(
-				"%sAll sub-issues are complete — the last one, [%s](mention://issue/%s) — \"%s\", just finished. Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
-				mentionPrefix, identifier, childID, title, parentID,
+				"%sAll sub-issues are complete — the last one, [%s](mention://issue/%s) — \"%s\", just finished. %s",
+				mentionPrefix, identifier, childID, title, parentContinuationInstruction(parentID),
 			)
 		}
 	}
@@ -584,7 +583,13 @@ func stageAdvanceInstruction(nextStage int32, parentID string) string {
 			nextStage, parentID, nextStage,
 		)
 	}
-	return fmt.Sprintf(" Completing this stage does not mean the whole issue is done. Decide whether the issue is actually complete — if so, synthesize the results and run `multica issue status %s in_review` to mark the parent ready for review — or whether the next stage still needs to be created, in which case create that stage and its sub-issues now.", parentID)
+	return " Completing this stage does not mean the whole issue is done. " + parentContinuationInstruction(parentID)
+}
+
+// parentContinuationInstruction leaves acceptance and approval decisions with
+// the executor without prescribing another stage or a ceremonial review.
+func parentContinuationInstruction(parentID string) string {
+	return fmt.Sprintf("Continue the existing parent from the latest result. Reuse existing delivery and review issues; create a next stage only for genuinely distinct remaining work. If acceptance and required approvals are satisfied, run `multica issue status %s done`; use in_review only for a required human decision and name its owner. Otherwise keep the parent in_progress or record the specific blocker. Check active runs before any handoff; do not add a second mention or rerun for an assignee already working.", parentID)
 }
 
 // sanitizeChildTitleForSystemComment removes mention-style markdown from a
