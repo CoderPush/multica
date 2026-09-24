@@ -5,9 +5,6 @@ and production operations. Open enhancement PRs against this fork's `main`, not
 upstream. Production environment changes are performed on the host; record their
 non-secret intent and verification here. Never commit credentials or database dumps.
 
-For the new team workspace, squad, runtime setup and remaining onboarding steps,
-see [CoderFactory team setup](coderfactory.md).
-
 ## Current release — 24 September 2026
 
 Production runs CoderPush main commit `355006fc62cc379eabeb61b2a9ee50e2707e2dd7`,
