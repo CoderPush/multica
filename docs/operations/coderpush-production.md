@@ -8,7 +8,30 @@ non-secret intent and verification here. Never commit credentials or database du
 For the new team workspace, squad, runtime setup and remaining onboarding steps,
 see [CoderFactory team setup](coderfactory.md).
 
-## Verified inventory — 18 September 2026
+## Current release — 24 September 2026
+
+Production runs CoderPush main commit `355006fc62cc379eabeb61b2a9ee50e2707e2dd7`,
+which merges upstream `e909e9c89d524cd54c1d5f4fa5963882093efdc9` and preserves
+our handoff fixes. Backend and frontend are pinned to verified local image IDs;
+schema is 547. Cutover completed at 08:13:28 UTC. Health, readiness, signed-in UI,
+all 79 previously online runtime registrations and Lark websocket reconnection
+were verified. Existing signup configuration and secrets were preserved.
+
+See [the upgrade receipt](upstream-upgrade-20260924.md) for image identities,
+CI, migration/restore rehearsal, final backups, and rollback requirements.
+The original local pilot containers and volumes were removed. The development
+database is retained but stopped; it is only needed for fork development/tests.
+
+The base `/opt/multica/compose.yml` now pins the new images and disables pulling;
+the matching `/opt/multica/coderpush-images.yml` overlay is retained. Base-only
+Compose operations have the same effective configuration. GHCR packages remain
+private. Use the manual **Export CoderPush release images** workflow when the
+host lacks registry credentials; validate archive checksum, original registry
+digests and imported OCI image identity as the receipt describes. Never copy
+personal or runtime GitHub tokens to the host. `DO_NOT_TRACK=1` disables the new
+upstream telemetry sender.
+
+## Historical inventory — 18 September 2026
 
 Production is **AWS Lightsail Singapore**, not Hetzner. Hetzner was evaluated
 before the Lightsail deployment on 15 September. DNS and SSH verified the current
@@ -93,18 +116,19 @@ after policy changes and verify its effective environment, not just the file.
 
 ## Deployment from this fork's main
 
-**Prepared locally; not activated in production.** Production still uses upstream
-v0.4.43. There is no automatic main-to-server rollout. The fork checkout inspected
-was `7e4758ac1a94e9ff843696333364610bb8d4bbf7`: 78 commits after v0.4.43,
-with 32 new migrations, 468–499. Migration 468 deletes obsolete link rows and drops
-columns; an image-only rollback is not sufficient after a schema upgrade.
+**Activated on 24 September 2026.** The first fork release and restore rehearsal
+are complete; see the current release and receipt above. There is no automatic
+main-to-server rollout. Each future release still needs matched image builds,
+CI and migration review. The first upgrade applied 77 migrations from schema
+467 through 547. Migration 468 deletes obsolete link rows and drops columns;
+an image-only rollback to v0.4.43 is not sufficient.
 
 The fork workflow `.github/workflows/coderpush-images.yml` is manually dispatched
 on `main` and publishes Linux AMD64 backend/frontend images tagged with the full
 commit SHA. It uses the workflow's package token and needs no production SSH key.
 It does not publish a moving `latest` tag or deploy anything. Both build jobs must
 succeed for the same SHA; a partial publication is not a release. Existing CI must
-also pass for that SHA. The workflow must first be committed and merged to `main`.
+also pass for that SHA. The build and export workflows are committed and available on `main`.
 
 1. Review the intended `main` commit, changes since the running version, migration
    compatibility, and existing CI results. Build both images using **CoderPush main
@@ -204,8 +228,7 @@ a claim that each integration was retested on 18 September.
 - `01a0adbe-0b3c-7cf0-bdbe-371a8ae36194` — **Investigate multica setup failure**:
   Singapore model authentication diagnosis.
 
-Open items: first fork image build and deployment rehearsal; backup restore testing
-and retention/off-host verification; reconcile newer CoderInternals/NanoHome runtime
+Open items: backup retention/off-host verification; reconcile newer CoderInternals/NanoHome runtime
 configuration before changing shared services. Keep live runtime edits and repository
 delivery status separate: a host change does not mean a PR was committed or merged.
 
