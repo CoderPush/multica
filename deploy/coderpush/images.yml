@@ -1,0 +1,7 @@
+# Layer over /opt/multica/compose.yml; preserve its ports, env and volumes.
+# Supply digest references after both images from one main commit are verified.
+services:
+  backend:
+    image: ${CODERPUSH_BACKEND_IMAGE:?Set the verified backend image digest}
+  frontend:
+    image: ${CODERPUSH_WEB_IMAGE:?Set the verified frontend image digest}
