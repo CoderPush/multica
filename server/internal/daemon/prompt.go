@@ -638,8 +638,7 @@ func buildChatPrompt(task Task) string {
 	// thread reader, so they get the transcript command without the thread
 	// drill-down (MUL-4899).
 	//
-	// WHERE the conversation lives is therefore per-branch, not shared: only the
-	// unconditional "don't go looking in issues/comments" survives up top. Saying
+	// WHERE the conversation lives is therefore per-branch, not shared. Saying
 	// "its history lives in the channel, NOT in Multica" for every channel type
 	// contradicted the very next line on a transcript surface, which tells the
 	// agent Multica stored it and hands it the command to read it back. An agent
@@ -652,7 +651,8 @@ func buildChatPrompt(task Task) string {
 	// silently dropped it for Feishu/Lark (GH #6006).
 	if task.ChatChannelType != "" {
 		platform := channelDisplayName(task.ChatChannelType)
-		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. Never look in Multica issues or comments for this conversation.\n", platform)
+		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. Do not use Multica issues or comments as a substitute for this conversation's history.\n", platform)
+		b.WriteString("When the user asks about a referenced Multica issue, read that issue and its relevant comments with the Multica CLI within your existing role and access. A missing quote or unavailable channel history does not prevent looking up a supplied issue ID or link. This does not authorize unrelated issue access, new permissions, or actions beyond your Agent Identity.\n")
 		if task.ChatChannelType == execenv.ChannelTypeSlack {
 			fmt.Fprintf(&b, "This conversation and its history live in %s, NOT in Multica. The message below may be only what triggered you. Read the conversation with:\n", platform)
 			b.WriteString("- `multica chat history --output json` — the channel overview: recent top-level messages, each thread tagged with a `thread_id` and `reply_count`. It does NOT expand thread contents.\n")

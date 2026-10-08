@@ -580,10 +580,37 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 			if strings.Contains(out, "NOT in Multica") {
 				t.Errorf("transcript surface told its history is NOT in Multica, then told to read it from Multica\n--- output ---\n%s", out)
 			}
-			// The useful half of the original sentence must survive: the agent
-			// still must not go hunting through issues and comments.
-			if !strings.Contains(out, "Never look in Multica issues or comments") {
-				t.Errorf("lost the issues/comments prohibition\n--- output ---\n%s", out)
+			if !strings.Contains(out, "Do not use Multica issues or comments as a substitute for this conversation's history") {
+				t.Errorf("lost the conversation-history boundary\n--- output ---\n%s", out)
+			}
+		})
+	}
+}
+
+func TestBuildChatPromptReferencedIssueLookup(t *testing.T) {
+	for _, channelType := range []string{
+		execenv.ChannelTypeSlack,
+		execenv.ChannelTypeFeishu,
+		execenv.ChannelTypeWecom,
+		execenv.ChannelTypeDingtalk,
+		"unknown-channel",
+	} {
+		t.Run(channelType, func(t *testing.T) {
+			out := buildChatPrompt(Task{
+				ChatSessionID: "sess-1", ChatChannelType: channelType,
+				ChatMessage: "[Recent context unavailable]\nCLP-104: what is the next step?",
+			})
+			for _, want := range []string{
+				"read that issue and its relevant comments with the Multica CLI within your existing role and access",
+				"A missing quote or unavailable channel history does not prevent looking up a supplied issue ID or link",
+				"This does not authorize unrelated issue access, new permissions, or actions beyond your Agent Identity",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing referenced-issue guidance %q", want)
+				}
+			}
+			if strings.Contains(out, "Never look in Multica issues or comments") {
+				t.Error("channel prompt still prohibits referenced-issue lookup")
 			}
 		})
 	}
