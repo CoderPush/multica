@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, coderpush-deploy]
   pull_request:
-    branches: [main]
+    branches: [main, coderpush-deploy]
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
