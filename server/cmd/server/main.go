@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/maintenance"
