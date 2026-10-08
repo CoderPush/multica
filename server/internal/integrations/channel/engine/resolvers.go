@@ -396,11 +396,19 @@ type TypingNotifier interface {
 	OnSettled(ctx context.Context, sessionID pgtype.UUID)
 }
 
+// InboundInterceptor persists an opt-in source-only route after installation
+// validation and before private-agent dedup, mention and identity handling.
+// A handled event MUST NOT continue into a private agent session.
+type InboundInterceptor interface {
+	Capture(context.Context, ResolvedInstallation, channel.InboundMessage) (handled bool, err error)
+}
+
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.
 // Installation/Identity/Dedup/Session/Audit are required; Replier/Typing are
 // optional. OriginType is the issue.origin_type label written for /issue
 // commands from this channel (Feishu: "lark_chat").
 type ResolverSet struct {
+	Ingress      InboundInterceptor
 	Installation InstallationResolver
 	Identity     IdentityResolver
 	Dedup        Deduper

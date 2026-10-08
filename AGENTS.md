@@ -121,6 +121,8 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 
 ## Change and Delivery Rules
 
+- Keep installation-specific automation and policy outside the product repository. Prefer existing APIs; any necessary product extension must have a minimal, reusable contract aligned with upstream.
+
 - Keep changes scoped; reuse existing patterns. Code comments are English.
 - Do not add internal compatibility shims, dual writes, fallback paths, or legacy adapters unless requested. This does not relax API response compatibility above.
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
