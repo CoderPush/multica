@@ -303,6 +303,8 @@ ws_vcs_connections AS MATERIALIZED (
 ),
 ws_channel_installations AS MATERIALIZED (
     SELECT id FROM channel_installation WHERE workspace_id = $1
+    UNION
+    SELECT installation_id AS id FROM lark_knowledge_state WHERE workspace_id = $1
 ),
 ws_lark_installations AS MATERIALIZED (
     SELECT id FROM lark_installation WHERE workspace_id = $1
@@ -447,6 +449,32 @@ deleted_github_check_suites AS (
 ),
 deleted_pending_github_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+),
+deleted_lark_knowledge_assessments AS (
+    DELETE FROM lark_knowledge_assessment WHERE file_id IN (
+        SELECT id FROM lark_knowledge_file
+        WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+    )
+),
+deleted_lark_knowledge_event AS (
+    DELETE FROM lark_knowledge_event
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
+deleted_lark_knowledge_job AS (
+    DELETE FROM lark_knowledge_job
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
+deleted_lark_knowledge_source AS (
+    DELETE FROM lark_knowledge_source
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
+deleted_lark_knowledge_file AS (
+    DELETE FROM lark_knowledge_file
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
+deleted_lark_knowledge_state AS (
+    DELETE FROM lark_knowledge_state
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
 ),
 deleted_channel_task_deliveries AS (
     DELETE FROM channel_task_delivery

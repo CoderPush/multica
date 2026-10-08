@@ -55,6 +55,8 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 const deleteWorkspace = `-- name: DeleteWorkspace :exec
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
+    UNION
+    SELECT installation_id AS id FROM lark_knowledge_state WHERE workspace_id = $1
 ),
 ws_sessions AS (
     SELECT id FROM chat_session WHERE workspace_id = $1
@@ -64,6 +66,26 @@ ws_agents AS (
 ),
 ws_skills AS (
     SELECT id FROM skill WHERE workspace_id = $1
+),
+cleared_lark_knowledge_assessments AS (
+    DELETE FROM lark_knowledge_assessment WHERE file_id IN (
+        SELECT id FROM lark_knowledge_file WHERE installation_id IN (SELECT id FROM ws_installations)
+    )
+),
+cleared_lark_knowledge_event AS (
+    DELETE FROM lark_knowledge_event WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_lark_knowledge_job AS (
+    DELETE FROM lark_knowledge_job WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_lark_knowledge_source AS (
+    DELETE FROM lark_knowledge_source WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_lark_knowledge_file AS (
+    DELETE FROM lark_knowledge_file WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_lark_knowledge_state AS (
+    DELETE FROM lark_knowledge_state WHERE installation_id IN (SELECT id FROM ws_installations)
 ),
 cleared_agent_label_assignments AS (
     DELETE FROM agent_to_label WHERE agent_id IN (SELECT id FROM ws_agents)

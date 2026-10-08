@@ -561,6 +561,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		opts,
 	)
 
+	knowledgePolicy, knowledgePolicyErr := lark.ParseKnowledgePolicy(os.Getenv("MULTICA_LARK_KNOWLEDGE_POLICY"))
+	if knowledgePolicyErr != nil {
+		panic(knowledgePolicyErr)
+	}
 	// Lark integration. Only wired when MULTICA_LARK_SECRET_KEY is set:
 	// the InstallationService refuses to fall back to plaintext storage
 	// for app_secret, and the BindingTokenService cannot mint usable
@@ -679,9 +683,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Logger:      slog.Default(),
 				})
 				mediaResolver := lark.NewFeishuMediaResolver(larkClient, installSvc, store, engine.NewDBMediaIntentLedger(queries), slog.Default())
-				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
+				feishuResolvers := lark.NewFeishuResolverSet(
 					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver,
-				))
+				)
+				if knowledgePolicy != nil {
+					knowledge, err := lark.NewGroupKnowledge(*knowledgePolicy, pool, larkClient, installSvc, h.LLM, store, h.IssueService, h.TaskService)
+					if err != nil {
+						panic(err)
+					}
+					h.LarkKnowledge = knowledge
+					feishuResolvers.Ingress = knowledge
+				}
+				channelRouter.Register(channel.TypeFeishu, feishuResolvers)
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
 				// One-shot union_id backfill for installations created
@@ -758,6 +771,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 	} else {
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
+	}
+
+	if knowledgePolicy != nil && h.LarkKnowledge == nil {
+		panic("Lark knowledge policy configured but Lark integration unavailable")
 	}
 
 	// Slack integration. Multi-tenant B2 model (MUL-3666): Multica hosts ONE

@@ -32,9 +32,8 @@ func (c *countingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 // layer — agent runs reach a model by their own path, which no variable here
 // governs. See the package doc.)
 //
-// Both consumers of this package send private chat content upstream — the
-// first message of a chat session (auto-titling) and the tail of a conversation
-// (follow-up questions). "Leave the LLM variables empty" is the documented
+// Consumers send chat or document content upstream: chat titles, follow-up
+// questions and opt-in Lark group knowledge (see the package inventory). "Leave the LLM variables empty" is the documented
 // answer for an operator whose policy forbids that (.env.example, the docs
 // environment-variables pages, and GitHub issue #7162), so the behaviour has to
 // be a tested guarantee rather than something that happens to be true today.

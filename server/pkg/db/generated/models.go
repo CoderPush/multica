@@ -1117,6 +1117,76 @@ type LarkInstallation struct {
 	Region             string             `json:"region"`
 }
 
+type LarkKnowledgeAssessment struct {
+	FileID    pgtype.UUID        `json:"file_id"`
+	Result    []byte             `json:"result"`
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type LarkKnowledgeEvent struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	EventKey       string             `json:"event_key"`
+	Payload        []byte             `json:"payload"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+}
+
+type LarkKnowledgeFile struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChatID         string             `json:"chat_id"`
+	Digest         string             `json:"digest"`
+	Filename       string             `json:"filename"`
+	Original       []byte             `json:"original"`
+	Extracted      string             `json:"extracted"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type LarkKnowledgeJob struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChatID         string             `json:"chat_id"`
+	JobKey         string             `json:"job_key"`
+	SourceID       pgtype.UUID        `json:"source_id"`
+	Revision       string             `json:"revision"`
+	Kind           string             `json:"kind"`
+	Stage          string             `json:"stage"`
+	State          []byte             `json:"state"`
+	Attempts       int32              `json:"attempts"`
+	AvailableAt    pgtype.Timestamptz `json:"available_at"`
+	LastError      string             `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LarkKnowledgeSource struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChatID         string             `json:"chat_id"`
+	MessageID      string             `json:"message_id"`
+	Revision       string             `json:"revision"`
+	Message        []byte             `json:"message"`
+	Body           string             `json:"body"`
+	Extracted      string             `json:"extracted"`
+	Digest         string             `json:"digest"`
+	Available      bool               `json:"available"`
+	CheckedAt      pgtype.Timestamptz `json:"checked_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LarkKnowledgeState struct {
+	InstallationID   pgtype.UUID        `json:"installation_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	HistoryThrough   pgtype.Timestamptz `json:"history_through"`
+	LastReconciledAt pgtype.Timestamptz `json:"last_reconciled_at"`
+	NextReconcileAt  pgtype.Timestamptz `json:"next_reconcile_at"`
+	LastError        string             `json:"last_error"`
+	ModelDay         pgtype.Date        `json:"model_day"`
+	ModelCalls       int32              `json:"model_calls"`
+}
+
 type LarkOutboundCardMessage struct {
 	ID                pgtype.UUID        `json:"id"`
 	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`

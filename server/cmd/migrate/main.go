@@ -140,7 +140,14 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"572_lark_knowledge_workspace":                              "lark_knowledge_workspace",
 	"563_search_index_change_changed_at_index":                  "idx_search_index_change_changed_at",
+	"566_lark_knowledge_source_key":                             "lark_knowledge_source_key",
+	"567_lark_knowledge_event_key":                              "lark_knowledge_event_key",
+	"568_lark_knowledge_file_digest":                            "lark_knowledge_file_digest",
+	"569_lark_knowledge_job_key":                                "lark_knowledge_job_key",
+	"570_lark_knowledge_pending_jobs":                           "lark_knowledge_pending_jobs",
+	"571_lark_knowledge_source_search":                          "lark_knowledge_source_search",
 	"562_search_index_change_workspace_index":                   "idx_search_index_change_workspace_xid",
 	"552_agent_task_history_page_index":                         "idx_agent_task_queue_history_page",
 	"535_github_pr_address_index":                               "idx_github_pull_request_pr_owner_repo",

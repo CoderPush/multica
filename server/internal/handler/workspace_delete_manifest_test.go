@@ -19,6 +19,13 @@ const (
 // teardown. Adding a table requires an explicit ownership decision here; the
 // handler deletion graph must then implement that decision before CI passes.
 var workspaceDeletionManifest = map[string]workspaceDeleteAction{
+	"lark_knowledge_assessment": workspaceDelete,
+	"lark_knowledge_event":      workspaceDelete,
+	"lark_knowledge_job":        workspaceDelete,
+	"lark_knowledge_source":     workspaceDelete,
+	"lark_knowledge_file":       workspaceDelete,
+	"lark_knowledge_state":      workspaceDelete,
+
 	"activity_log":                       workspaceDelete,
 	"agent":                              workspaceDelete,
 	"agent_builder_draft":                workspaceDelete,

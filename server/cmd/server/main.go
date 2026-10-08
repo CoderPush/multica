@@ -796,6 +796,9 @@ func main() {
 	// Media intent-ledger reconciler (PR #5580): settles uploaded-but-unbound
 	// channel media objects. An independent worker so object-storage latency
 	// spikes cannot starve any other sweeper's cadence.
+	if h.LarkKnowledge != nil {
+		go h.LarkKnowledge.Run(sweepCtx)
+	}
 	if h.ChannelMediaReconciler != nil {
 		h.ChannelMediaReconciler.Metrics = channelMediaMetrics
 		go h.ChannelMediaReconciler.Run(sweepCtx)

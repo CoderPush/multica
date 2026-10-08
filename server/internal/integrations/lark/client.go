@@ -197,6 +197,8 @@ type DownloadedResourceStream struct {
 // JSON-encoded, msg_type-specific string Lark double-encodes) so the
 // flattener — not the transport client — owns content interpretation.
 type LarkMessage struct {
+	MessageAppLink string
+	ChatID         string
 	MessageID      string
 	MessageType    string // Lark `msg_type`: text / post / image / merge_forward / …
 	Content        string // raw body.content (a JSON-encoded string)
@@ -290,6 +292,8 @@ type PatchCardParams struct {
 // Text is sent verbatim to Lark; the client handles JSON encoding of
 // the `{"text": "..."}` content envelope Lark requires.
 type SendTextParams struct {
+	// UUID is Lark's one-hour idempotency key. Empty preserves legacy sends.
+	UUID           string
 	InstallationID InstallationCredentials
 	ChatID         ChatID
 	Text           string

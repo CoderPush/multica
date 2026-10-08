@@ -396,6 +396,12 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 		return "", fmt.Errorf("lark http client: encode text content: %w", err)
 	}
 	path, body := outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget)
+	if p.UUID != "" {
+		if len(p.UUID) > 50 {
+			return "", errors.New("lark idempotency key exceeds 50 characters")
+		}
+		body["uuid"] = p.UUID
+	}
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -644,7 +650,7 @@ func (c *httpAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 		if isTokenError(resp.Code) {
 			c.invalidateToken(creds.AppID)
 		}
-		return nil, fmt.Errorf("lark http client: get message: code=%d msg=%q", resp.Code, resp.Msg)
+		return nil, &APIError{Op: "get message", Code: resp.Code, Msg: resp.Msg}
 	}
 
 	out := make([]LarkMessage, 0, len(resp.Data.Items))
@@ -1059,6 +1065,8 @@ func (c *httpAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCre
 // ways the enricher cares about: msg_type (not message_type), and a
 // flat `sender.id` / `mentions[].id` string (not a nested id object).
 type larkRESTMessageItem struct {
+	MessageAppLink string `json:"message_app_link"`
+	ChatID         string `json:"chat_id"`
 	MessageID      string `json:"message_id"`
 	RootID         string `json:"root_id"`
 	ParentID       string `json:"parent_id"`
@@ -1084,6 +1092,8 @@ type larkRESTMessageItem struct {
 
 func (it larkRESTMessageItem) normalize() LarkMessage {
 	m := LarkMessage{
+		MessageAppLink: it.MessageAppLink,
+		ChatID:         it.ChatID,
 		MessageID:      it.MessageID,
 		MessageType:    it.MsgType,
 		Content:        it.Body.Content,
