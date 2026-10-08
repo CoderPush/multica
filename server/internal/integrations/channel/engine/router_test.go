@@ -2245,3 +2245,58 @@ func TestRouter_MediaDeadlineStartsBeforeAppend(t *testing.T) {
 		t.Fatal("resolver did not run")
 	}
 }
+
+type captureInterceptor struct {
+	called  int
+	handled bool
+	err     error
+}
+
+func (c *captureInterceptor) Capture(context.Context, ResolvedInstallation, channel.InboundMessage) (bool, error) {
+	c.called++
+	return c.handled, c.err
+}
+func TestRouterSourceCaptureBeforePrivateAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		active, handled, fail bool
+	}{
+		{"passive group", true, true, false}, {"database failure", true, true, true}, {"capture-only preserves private gate", true, false, false}, {"revoked installation", false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.inst.inst.Active = tc.active
+			h.ident.err = ErrSenderUnbound
+			capture := &captureInterceptor{handled: tc.handled}
+			if tc.fail {
+				capture.err = errors.New("database down")
+			}
+			set := h.router.sets[channel.TypeFeishu]
+			set.Ingress = capture
+			h.router.Register(channel.TypeFeishu, set)
+			msg := p2pMessage(t)
+			msg.Source.ChatType = channel.ChatTypeGroup
+			msg.AddressedToBot = false
+			err := h.router.Handle(context.Background(), msg)
+			if (err != nil) != tc.fail {
+				t.Fatalf("error=%v", err)
+			}
+			wantCalls := 1
+			if !tc.active {
+				wantCalls = 0
+			}
+			if capture.called != wantCalls {
+				t.Fatalf("capture calls=%d", capture.called)
+			}
+			if (tc.handled || !tc.active) && h.dedup.claimCalls != 0 {
+				t.Fatal("source route reached private dedup")
+			}
+			if !tc.handled && h.dedup.claimCalls != 1 {
+				t.Fatal("capture-only bypassed existing private route")
+			}
+			if h.binder.ensureCalls != 0 {
+				t.Fatal("passive capture created private session")
+			}
+		})
+	}
+}

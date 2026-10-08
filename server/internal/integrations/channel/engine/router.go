@@ -300,6 +300,18 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 		return r.drop(ctx, set, msg, inst.ID, DropReasonRevokedInstallation), inst, nil
 	}
 
+	// Opt-in durable source capture is independent of private-agent authority.
+	// Returning success here means the source/job transaction committed.
+	if set.Ingress != nil {
+		handled, err := set.Ingress.Capture(ctx, inst, msg)
+		if err != nil {
+			return Result{}, inst, fmt.Errorf("capture source: %w", err)
+		}
+		if handled {
+			return Result{Outcome: OutcomeDropped}, inst, nil
+		}
+	}
+
 	// 2. Two-phase dedup claim with owner fencing — before group filter and
 	//    identity so a reconnect replay cannot re-trigger a binding prompt,
 	//    re-write a drop audit, or re-touch the session. Empty MessageID

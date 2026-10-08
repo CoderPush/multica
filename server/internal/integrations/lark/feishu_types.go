@@ -21,6 +21,7 @@ type InboundMessage struct {
 	ChatType     ChatType
 	MessageID    string
 	SenderOpenID OpenID
+	SenderType   string
 	Body         string
 	// Content is the raw msg_type-specific JSON string Lark sends in
 	// event.message.content. Text/post decoding consumes it immediately; media

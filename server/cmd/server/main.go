@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"log/slog"
 	"net/http"
 	"os"
@@ -661,6 +662,11 @@ func main() {
 	// Validate the LLM retry budget before the router exists: an operator who
 	// typed a value we cannot honor should see the boot stop, the same way a
 	// malformed feature-flag file does above.
+	larkIngress, err := lark.NewIngressRelay(os.Getenv("MULTICA_LARK_INGRESS_RELAY"))
+	if err != nil {
+		slog.Error("invalid Lark ingress relay configuration")
+		os.Exit(1)
+	}
 	llmMaxRetries, err := parseLLMMaxRetries(os.Getenv("MULTICA_LLM_MAX_RETRIES"))
 	if err != nil {
 		slog.Error("invalid MULTICA_LLM_MAX_RETRIES", "error", err)
@@ -692,6 +698,7 @@ func main() {
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
+		LarkIngress:         larkIngress,
 		LLMDisableThinking:  llmDisableThinking,
 	})
 	var replicaQueries *db.Queries
