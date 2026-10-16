@@ -98,13 +98,11 @@ import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
-// ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
 // DialogContent + everything inside; the surrounding `<Dialog>` is owned by
 // CreateIssueDialog so mode switching swaps only the inner panel without
 // remounting the Dialog Root (no overlay flash). `onSwitchMode` flips the
 // shell's local mode state.
-// ---------------------------------------------------------------------------
 
 // CreateRunHint is the create modal's passive pre-trigger label (MUL-3375 §4):
 // whether saving will start a run, driven by the unified backend predicate
