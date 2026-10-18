@@ -5,7 +5,9 @@ const fs = require('node:fs/promises');
 const { chromium } = require('/Users/webworker/tools/browser/node_modules/playwright');
 
 async function main() {
-  const role = process.argv[process.argv.indexOf('--role') + 1];
+  const roleIndex = process.argv.indexOf('--role');
+  assert.ok(roleIndex > 0 && roleIndex + 1 < process.argv.length, 'Missing --role engineer|reviewer');
+  const role = process.argv[roleIndex + 1];
   assert.ok(['engineer', 'reviewer'].includes(role));
   assert.equal(process.getuid(), 600, 'worker UID changed; inspect account first');
   assert.equal(process.env.MULTICA_REPO_CHECKOUT_MODE, 'isolated');

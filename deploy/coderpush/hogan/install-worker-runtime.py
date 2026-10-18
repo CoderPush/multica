@@ -20,6 +20,9 @@ ENTRY = Path('/usr/local/libexec/coderpush-webworker-launch.py')
 BACKUPS = Path('/var/backups/coderpush-webworker')
 SOURCES = {'worker-launch.py': ENTRY}
 TARGETS = list(SOURCES.values()) + [PLIST]
+MAINTENANCE = Path('/usr/local/libexec/coderpush-webworker')
+MAINTENANCE_FILES = ('install-worker-runtime.py', 'worker-launch.py', 'worker-maintenance.py')
+SUDOERS = Path('/private/etc/sudoers.d/coderpush-webworker-maintenance')
 
 
 def run(args, **kwargs):
@@ -62,10 +65,10 @@ def configuration(original):
     return updated
 
 
-def protected_source(directory):
+def protected_source(directory, names=None):
     # Apply only from an administrator-owned bundle, never a worker-writable tree.
-    allowed = {0, int(os.environ.get('SUDO_UID', os.getuid()))}
-    for path in [directory, *directory.parents, *(directory / name for name in SOURCES)]:
+    allowed = {0, pwd.getpwnam('hogan').pw_uid}
+    for path in [directory, *directory.parents, *(directory / name for name in (names or SOURCES))]:
         info = path.lstat()
         if path.is_symlink() or info.st_uid not in allowed or info.st_mode & 0o022:
             raise RuntimeError('Unsafe installer source ownership or permissions: ' + str(path))
@@ -138,6 +141,7 @@ def restore(directory):
 
 def bootout():
     run(['/bin/launchctl', 'bootout', 'system/' + LABEL])
+    wait_unloaded()
 
 
 def service_state():
@@ -161,7 +165,56 @@ def rollback_allowed(info):
 
 
 def bootstrap():
-    run(['/bin/launchctl', 'bootstrap', 'system', str(PLIST)])
+    wait_unloaded()
+    try:
+        run(['/bin/launchctl', 'bootstrap', 'system', str(PLIST)])
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError('launchd bootstrap failed: ' + (error.stderr or str(error)).strip()) from error
+
+
+def wait_unloaded():
+    # bootout acknowledges the request before launchd finishes removing the job.
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if not service_state()[0]:
+            return
+        time.sleep(0.1)
+    raise RuntimeError('launchd did not finish removing the worker within 15 seconds.')
+
+
+def protected_root_directory(directory):
+    directory.mkdir(mode=0o755, parents=True, exist_ok=True)
+    for path in [directory, *directory.parents]:
+        info = path.lstat()
+        if path.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022:
+            raise RuntimeError('Unsafe root maintenance directory: ' + str(path))
+
+
+def maintenance_rule():
+    command = str(MAINTENANCE / 'worker-maintenance.py')
+    return 'hogan ALL=(root) NOPASSWD: ' + ', '.join(command + ' ' + action
+                                                  for action in ('status', 'apply', 'rollback')) + '\n'
+
+
+def authorize_maintenance(directory):
+    protected_source(directory, MAINTENANCE_FILES)
+    protected_root_directory(MAINTENANCE)
+    protected_root_directory(SUDOERS.parent)
+    # Validate the exact sudo rule before installing any executable capability.
+    fd, candidate = tempfile.mkstemp(prefix='.coderpush-check-', dir=SUDOERS.parent)
+    try:
+        with os.fdopen(fd, 'w') as output:
+            output.write(maintenance_rule())
+            os.fchmod(output.fileno(), 0o440)
+        run(['/usr/sbin/visudo', '-cf', candidate])
+        for name in MAINTENANCE_FILES:
+            atomic(MAINTENANCE / name, (directory / name).read_bytes(), 0o755, 0, 0)
+        atomic(SUDOERS, maintenance_rule().encode(), 0o440, 0, 0)
+    finally:
+        os.unlink(candidate)
+    print(json.dumps({'result': 'maintenance-authorized', 'operator': 'hogan',
+                      'command': str(MAINTENANCE / 'worker-maintenance.py'),
+                      'actions': ['status', 'apply', 'rollback'], 'workerRestarted': False}))
 
 
 def wait_running(previous_pid):
@@ -207,7 +260,7 @@ def install(directory, before, updated):
             try:
                 if service_state()[0]:
                     bootout()
-            except subprocess.SubprocessError as recovery_error:
+            except (subprocess.SubprocessError, RuntimeError) as recovery_error:
                 # Restore files even if launchd cannot finish stopping its job.
                 restore(saved)
                 raise RuntimeError('Service shutdown failed during recovery. Original files restored; '
@@ -224,6 +277,7 @@ def main():
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--apply', action='store_true')
     action.add_argument('--rollback', type=Path)
+    action.add_argument('--authorize-maintenance', action='store_true')
     args = parser.parse_args()
     directory = Path(__file__).absolute().parent
     original = plistlib.loads(PLIST.read_bytes())
@@ -231,13 +285,16 @@ def main():
     account = pwd.getpwnam('webworker')
     if (account.pw_uid, account.pw_gid, account.pw_dir) != (600, 600, str(ROOT)):
         raise RuntimeError('Unexpected webworker account.')
-    if not args.apply and not args.rollback:
+    if not args.apply and not args.rollback and not args.authorize_maintenance:
         print(json.dumps({'mode': 'check', 'service': LABEL, 'account': 'webworker',
                           'targets': [str(path) for path in TARGETS],
                           'preflight': ['engineer', 'reviewer'], 'automaticRollback': True}))
         return
     if os.geteuid() != 0:
-        raise RuntimeError('--apply and --rollback require OS administrator authorization.')
+        raise RuntimeError('Runtime mutations require OS administrator authorization.')
+    if args.authorize_maintenance:
+        authorize_maintenance(directory)
+        return
     protected_source(directory)
     before = status()
     if args.rollback:
@@ -251,10 +308,7 @@ def main():
         print(json.dumps({'rollback': str(selected), 'status': wait_running(before.get('pid'))}))
         return
     require_idle(before)
-    ENTRY.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-    for path in [ENTRY.parent, *ENTRY.parent.parents]:
-        if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
-            raise RuntimeError('Root entrypoint parent is writable by another account: ' + str(path))
+    protected_root_directory(ENTRY.parent)
     install(directory, before, updated)
 
 

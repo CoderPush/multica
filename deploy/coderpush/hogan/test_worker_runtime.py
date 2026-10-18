@@ -8,7 +8,7 @@ import tempfile
 import subprocess
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 HERE = Path(__file__).parent
@@ -37,6 +37,109 @@ def installer_mocks(module):
 
 
 class WorkerRuntimeTest(unittest.TestCase):
+    def test_source_trust_does_not_accept_worker_uid_from_environment(self):
+        module = load('install-worker-runtime')
+        metadata = SimpleNamespace(st_uid=600, st_mode=0o40755)
+        with patch.object(module.pwd, 'getpwnam', return_value=SimpleNamespace(pw_uid=501)), patch.object(module.Path, 'lstat', return_value=metadata), patch.dict(os.environ, {'SUDO_UID': '600'}):
+            with self.assertRaisesRegex(RuntimeError, 'Unsafe installer source'):
+                module.protected_source(Path('/worker/source'))
+
+    def test_bootout_waits_for_actual_removal_before_returning(self):
+        module = load('install-worker-runtime')
+        events = []
+        states = iter([(True, 123), (True, None), (False, None)])
+        def inspect():
+            state = next(states)
+            events.append(state[0])
+            return state
+        with patch.object(module, 'run') as run, patch.object(module, 'service_state', side_effect=inspect), patch.object(module.time, 'sleep'):
+            module.bootout()
+        run.assert_called_once_with(['/bin/launchctl', 'bootout', 'system/' + module.LABEL])
+        self.assertEqual(events, [True, True, False])
+
+    def test_bootstrap_is_not_attempted_while_job_removal_is_pending(self):
+        module = load('install-worker-runtime')
+        with patch.object(module, 'wait_unloaded', side_effect=RuntimeError('removal pending')), patch.object(module, 'run') as execute:
+            with self.assertRaisesRegex(RuntimeError, 'removal pending'):
+                module.bootstrap()
+            execute.assert_not_called()
+
+    def test_bootstrap_surfaces_launchd_diagnostic(self):
+        module = load('install-worker-runtime')
+        error = subprocess.CalledProcessError(5, 'launchctl', stderr='Operation already in progress')
+        with patch.object(module, 'wait_unloaded'), patch.object(module, 'run', side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, 'Operation already in progress'):
+                module.bootstrap()
+
+    def test_maintenance_sudo_rule_grants_only_fixed_operator_actions(self):
+        module = load('install-worker-runtime')
+        command = '/usr/local/libexec/coderpush-webworker/worker-maintenance.py'
+        self.assertEqual(module.maintenance_rule(),
+                         'hogan ALL=(root) NOPASSWD: ' + ', '.join(command + ' ' + action
+                                                                 for action in ('status', 'apply', 'rollback')) + '\n')
+        self.assertNotIn('webworker ALL=', module.maintenance_rule())
+        self.assertNotIn('*', module.maintenance_rule())
+        self.assertNotIn('/usr/bin/python3', module.maintenance_rule())
+
+    def test_maintenance_rejects_arbitrary_arguments_before_loading_privileged_code(self):
+        module = load('worker-maintenance')
+        for args in ([], ['apply', '/tmp/code'], ['shell'], ['--authorize-maintenance']):
+            with self.subTest(args=args), patch.object(module.os, 'geteuid', return_value=0), patch.object(module.sys, 'argv', ['maintenance', *args]), patch.object(module, 'load_installer') as importer:
+                with self.assertRaises(SystemExit):
+                    module.main()
+                importer.assert_not_called()
+
+    def test_maintenance_rejects_non_root(self):
+        module = load('worker-maintenance')
+        with patch.object(module.os, 'geteuid', return_value=600), patch.object(module, 'load_installer') as importer:
+            with self.assertRaises(SystemExit):
+                module.main()
+            importer.assert_not_called()
+
+    def test_maintenance_dispatches_only_fixed_installed_actions(self):
+        module = load('worker-maintenance')
+        for action in ('status', 'apply', 'rollback'):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as temp, ExitStack() as stack:
+                root = Path(temp)
+                fake = SimpleNamespace(status=Mock(return_value={'status': 'running', 'pid': 123, 'secret': 'hidden'}),
+                                       main=Mock())
+                stack.enter_context(patch.object(module, 'HERE', root))
+                stack.enter_context(patch.object(module.os, 'geteuid', return_value=0))
+                stack.enter_context(patch.object(module.os, 'fstat', return_value=SimpleNamespace(st_uid=0, st_mode=0o100600)))
+                stack.enter_context(patch.object(module.sys, 'argv', ['maintenance', action]))
+                stack.enter_context(patch.dict(os.environ, {'PYTHONPATH': '/untrusted'}, clear=True))
+                stack.enter_context(patch.object(module, 'load_installer', return_value=fake))
+                stack.enter_context(patch.object(module, 'latest_backup', return_value=Path('/safe/backup')))
+                output = stack.enter_context(redirect_stdout(io.StringIO()))
+                module.main()
+                self.assertNotIn('PYTHONPATH', os.environ)
+                self.assertEqual(os.environ['HOME'], '/var/root')
+                if action == 'status':
+                    fake.main.assert_not_called()
+                    self.assertNotIn('hidden', output.getvalue())
+                else:
+                    fake.main.assert_called_once_with()
+                    expected = ['--apply'] if action == 'apply' else ['--rollback', '/safe/backup']
+                    self.assertEqual(module.sys.argv, [str(root / 'install-worker-runtime.py'), *expected])
+                self.assertEqual((root / 'maintenance.lock').stat().st_mode & 0o777, 0o600)
+
+    def test_maintenance_refuses_concurrent_operation_before_loading_installer(self):
+        module = load('worker-maintenance')
+        with tempfile.TemporaryDirectory() as temp, ExitStack() as stack:
+            root = Path(temp)
+            descriptor = os.open(root / 'maintenance.lock', os.O_RDWR | os.O_CREAT, 0o600)
+            held = stack.enter_context(os.fdopen(descriptor, 'a'))
+            module.fcntl.flock(held, module.fcntl.LOCK_EX | module.fcntl.LOCK_NB)
+            stack.enter_context(patch.object(module, 'HERE', root))
+            stack.enter_context(patch.object(module.os, 'geteuid', return_value=0))
+            stack.enter_context(patch.object(module.os, 'fstat', return_value=SimpleNamespace(st_uid=0, st_mode=0o100600)))
+            stack.enter_context(patch.object(module.sys, 'argv', ['maintenance', 'apply']))
+            stack.enter_context(patch.dict(os.environ, {}, clear=True))
+            importer = stack.enter_context(patch.object(module, 'load_installer'))
+            with self.assertRaises(BlockingIOError):
+                module.main()
+            importer.assert_not_called()
+
     def test_preflight_failure_restores_files_without_stopping_service(self):
         module = load('install-worker-runtime')
         for role in ('engineer', 'reviewer'):
@@ -65,12 +168,14 @@ class WorkerRuntimeTest(unittest.TestCase):
 
     def test_recovery_shutdown_timeout_still_restores_files_without_bootstrap(self):
         module = load('install-worker-runtime')
-        with installer_mocks(module) as mocks:
-            mocks['bootout'].side_effect = subprocess.TimeoutExpired('launchctl', 40)
-            with self.assertRaisesRegex(RuntimeError, 'Original files restored'):
-                module.install(HERE, {'pid': 1}, {})
-            mocks['restore'].assert_called_once_with(Path('/safe/backup'))
-            mocks['bootstrap'].assert_not_called()
+        errors = [subprocess.TimeoutExpired('launchctl', 40), RuntimeError('removal did not finish')]
+        for error in errors:
+            with self.subTest(error=type(error).__name__), installer_mocks(module) as mocks:
+                mocks['bootout'].side_effect = error
+                with self.assertRaisesRegex(RuntimeError, 'Original files restored'):
+                    module.install(HERE, {'pid': 1}, {})
+                mocks['restore'].assert_called_once_with(Path('/safe/backup'))
+                mocks['bootstrap'].assert_not_called()
 
     def test_manual_rollback_accepts_only_idle_or_verified_stopped_worker(self):
         module = load('install-worker-runtime')

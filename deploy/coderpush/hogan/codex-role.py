@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python3 -I
 """Run one web role with its own credentials and a macOS filesystem sandbox."""
 import datetime
 import json

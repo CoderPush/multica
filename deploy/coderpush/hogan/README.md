@@ -58,6 +58,36 @@ for the worker to become idle, then run:
 sudo /usr/bin/python3 -I install-worker-runtime.py --rollback /var/backups/coderpush-webworker/BACKUP
 ```
 
+## Operator maintenance without repeated passwords
+
+An administrator can install a fixed maintenance capability once:
+
+```sh
+sudo /usr/bin/python3 -I install-worker-runtime.py --authorize-maintenance
+```
+
+This copies the reviewed installer, launcher and maintenance command into the
+root-owned `/usr/local/libexec/coderpush-webworker/` directory. It validates and
+installs a sudoers rule for the existing `hogan` operator identity only. It does
+not restart the worker, so authorization can be installed while a task runs.
+
+The operator can then run only these passwordless root actions:
+
+```sh
+sudo -n /usr/local/libexec/coderpush-webworker/worker-maintenance.py status
+sudo -n /usr/local/libexec/coderpush-webworker/worker-maintenance.py apply
+sudo -n /usr/local/libexec/coderpush-webworker/worker-maintenance.py rollback
+```
+
+`apply` runs the installed repair and its idle guards, preflights and rollback.
+`rollback` selects the latest validated root-owned backup. Commands are serialized
+by a root-only lock. No command accepts another program, path or extra argument.
+The worker roles receive no sudo permission; operators cannot change this root
+code without administrator authorization.
+
+The installer waits until launchd confirms job removal before bootstrapping its
+replacement. A successful `bootout` response alone does not mean removal finished.
+
 ## Acceptance
 
 SSH smoke tests do not prove daemon task health. After installation, dispatch a
