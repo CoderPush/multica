@@ -1,4 +1,4 @@
-import { normalizeStatusPatch } from "./status-category";
+import { issueBehavesAs, normalizeStatusPatch } from "./status-category";
 import {
   hashKey,
   useMutation,
@@ -14,6 +14,8 @@ import {
   cancelInboxLists,
   isInboxListRequestInFlight,
   onInboxInvalidate,
+  onInboxIssuesDeleted,
+  onInboxSummaryInvalidate,
 } from "../inbox/ws-updaters";
 import {
   applyIssueChange,
@@ -36,30 +38,37 @@ import {
   pruneDeletedIssueFromParentChildrenCaches,
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
+import { refreshSubscribedIssues } from "./subscribed";
+import { getCurrentWsId } from "../platform/workspace-storage";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
+import { useStarPromptStore } from "../star-prompt";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
   CreateCommentSubIssueManualRequest,
   CreateIssueRequest,
   ListIssuesCache,
+  ListIssuesResponse,
   MoveIssueRequest,
   UpdateIssueRequest,
+  BatchIssueLabelOps,
+  BatchIssuePropertyOps,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
 import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
 import { configStore } from "../config";
 import {
+  addReactionToList,
   onIssueAuxiliaryRevision,
   invalidateIssueOwnerProjections,
+  patchIssueReactions,
   reconcileIssueFullSnapshotRevision,
+  removeReactionFromList,
 } from "./ws-updaters";
 
-// ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
 // useMutationState consumers to keep the type assertion in sync.
-// ---------------------------------------------------------------------------
 
 export type ToggleCommentReactionVars = {
   commentId: string;
@@ -81,13 +90,9 @@ export type UpdateIssueMutationInput = {
   move_intent?: Pick<MoveIssueRequest, "before_id" | "after_id">;
 } & UpdateIssueRequest;
 
-// ---------------------------------------------------------------------------
 // Per-status pagination
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
 // Issue CRUD
-// ---------------------------------------------------------------------------
 
 // Shared by the single and batch update hooks, so the inbox re-read can wait
 // for the last of them (see `owedInboxRereads`).
@@ -168,6 +173,7 @@ function useIssueCreateMutation<TVariables>(
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
@@ -206,6 +212,8 @@ export function useUpdateIssue() {
       // a rapid follow-up edit. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
         description_base: _descriptionBase,
@@ -318,6 +326,8 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description_base: _descriptionBase,
         move_intent: _moveIntent,
@@ -350,6 +360,18 @@ export function useUpdateIssue() {
       );
       // The server has committed — safe to flush any drift it reported now.
       invalidateStaleListKeys(qc, reconcile.staleKeys);
+      if (
+        vars.status !== undefined &&
+        serverIssue.assignee_type === "agent" &&
+        serverIssue.assignee_id &&
+        issueBehavesAs(serverIssue, "done")
+      ) {
+        useStarPromptStore.getState().reportAgentIssueDone({
+          wsId,
+          agentId: serverIssue.assignee_id,
+          issueId: serverIssue.id,
+        });
+      }
     },
     onSettled: (_data, err, vars, ctx) => {
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
@@ -489,6 +511,10 @@ export function useDeleteIssue() {
     onSuccess: (_data, id, ctx) => {
       useRecentContextStore.getState().forgetContext(wsId, { type: "issue", id });
       cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadata);
+      // The deleting client's own inbox rows go with the issue; the WS echo
+      // (`issue:deleted` → `onInboxIssueDeleted`) is the backstop, not the
+      // plan — a dropped socket would leave ghost rows that 404 on click.
+      void onInboxIssuesDeleted(qc, wsId, [id]);
     },
     onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
@@ -497,24 +523,55 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
 }
 
+interface BatchUpdateSnapshots {
+  prevLists?: Iterable<readonly [QueryKey, unknown]>;
+  prevFlatLists?: Iterable<readonly [QueryKey, unknown]>;
+  prevTableRows?: Iterable<readonly [QueryKey, unknown]>;
+  prevSidebarLists?: Iterable<readonly [QueryKey, unknown]>;
+  prevDetailById?: Iterable<readonly [string, unknown]>;
+  prevInboxList?: unknown;
+  prevArchivedInboxCaches?: Iterable<readonly [QueryKey, unknown]>;
+  prevChildren?: Iterable<readonly [string, unknown]>;
+}
+
 export function useBatchUpdateIssues() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const rollback = (ctx: BatchUpdateSnapshots | undefined) => {
+    for (const [key, snapshot] of ctx?.prevLists ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevFlatLists ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevTableRows ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevSidebarLists ?? []) qc.setQueryData(key, snapshot);
+    for (const [id, snapshot] of ctx?.prevDetailById ?? []) qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
+    if (ctx?.prevInboxList !== undefined) qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
+    for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) qc.setQueryData(key, snapshot);
+    for (const [parentId, snapshot] of ctx?.prevChildren ?? []) {
+      qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+    }
+  };
   return useMutation({
     mutationKey: issueWriteMutationKey(wsId),
     mutationFn: ({
       ids,
       updates,
+      labels,
+      properties,
     }: {
       ids: string[];
       updates: UpdateIssueRequest;
-    }) => api.batchUpdateIssues(ids, updates),
+      labels?: BatchIssueLabelOps;
+      properties?: BatchIssuePropertyOps;
+    }) =>
+      labels || properties
+        ? api.batchUpdateIssues(ids, updates, { labels, properties })
+        : api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
       // Control and description-merge fields are not safe optimistic cache
       // patches. The server resolves description against description_base, so
@@ -522,6 +579,8 @@ export function useBatchUpdateIssues() {
       // until a refetch returns the committed result.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         description: _description,
         description_base: _descriptionBase,
         ...patch
@@ -547,6 +606,7 @@ export function useBatchUpdateIssues() {
         string,
         [QueryKey, IssueTableRowCache]
       >();
+      const prevSidebarListByHash = new Map<string, [QueryKey, ListIssuesResponse]>();
       const prevDetailById = new Map<string, Issue>();
       let prevInboxList: InboxItem[] | undefined;
       let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
@@ -571,6 +631,12 @@ export function useBatchUpdateIssues() {
           const hash = hashKey(key);
           if (!prevTableRowByHash.has(hash)) {
             prevTableRowByHash.set(hash, [key, snapshot]);
+          }
+        }
+        for (const [key, snapshot] of change.prevSidebarLists) {
+          const hash = hashKey(key);
+          if (!prevSidebarListByHash.has(hash)) {
+            prevSidebarListByHash.set(hash, [key, snapshot]);
           }
         }
         if (change.prevDetail) prevDetailById.set(id, change.prevDetail);
@@ -609,6 +675,7 @@ export function useBatchUpdateIssues() {
         prevLists: [...prevListByHash.values()],
         prevFlatLists: [...prevFlatListByHash.values()],
         prevTableRows: [...prevTableRowByHash.values()],
+        prevSidebarLists: [...prevSidebarListByHash.values()],
         prevDetailById,
         prevInboxList,
         prevArchivedInboxCaches,
@@ -618,38 +685,18 @@ export function useBatchUpdateIssues() {
         affectedParentIds,
       };
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prevLists) {
-        for (const [key, snapshot] of ctx.prevLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevFlatLists) {
-        for (const [key, snapshot] of ctx.prevFlatLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevTableRows) {
-        for (const [key, snapshot] of ctx.prevTableRows) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevDetailById) {
-        for (const [id, snapshot] of ctx.prevDetailById) {
-          qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
-        }
-      }
-      if (ctx?.prevInboxList !== undefined) {
-        qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
-      }
-      for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) {
-        qc.setQueryData(key, snapshot);
-      }
-      if (ctx?.prevChildren) {
-        for (const [parentId, snapshot] of ctx.prevChildren) {
-          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
-        }
-      }
+    onError: (_err, _vars, ctx) => rollback(ctx),
+    // The server skips items its per-issue guards refuse (a status the
+    // issue's workflow does not list, an assignee it cannot take) and reports
+    // only how many it wrote. Which ones were skipped is unknown, so the
+    // optimistic writes are undone and the affected caches refetched.
+    onSuccess: (data, { ids }, ctx) => {
+      if (data.updated >= ids.length) return;
+      rollback(ctx);
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+      for (const id of ids) qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
     },
     onSettled: (_data, err, _vars, ctx) => {
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
@@ -661,6 +708,14 @@ export function useBatchUpdateIssues() {
       // refreshed below, plus the specific keys the coordinator flagged as
       // drifted — the surgical replacement for the old blanket "invalidate
       // myAll on project move" safety net (MUL-3669 / #4548).
+      // Label and property writes are not patched optimistically; the
+      // realtime events usually land first, and this catches a dropped socket.
+      if (_vars.labels || _vars.properties) {
+        qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+        qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+        for (const id of _vars.ids) qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
+      }
       invalidateIssueDerivatives(qc, wsId, {
         statusOrProjectChanged:
           _vars.updates.status !== undefined ||
@@ -770,6 +825,9 @@ export function useBatchDeleteIssues() {
           forgetContext(wsId, { type: "issue", id });
           cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadataById.get(id));
         }
+        // Same inbox ownership as the single delete: prune this client's rows
+        // now instead of waiting for the `issue:deleted` echoes.
+        void onInboxIssuesDeleted(qc, wsId, ids);
         return;
       }
 
@@ -798,6 +856,11 @@ export function useBatchDeleteIssues() {
       }
       qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
       invalidateDeletedIssueDependentCaches(qc, wsId);
+      // The server skipped some of the batch and only reports the count, so
+      // which inbox rows survived is unknowable client-side — re-read the
+      // inbox instead of pruning by id.
+      void onInboxInvalidate(qc, wsId);
+      void onInboxSummaryInvalidate(qc);
     },
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
@@ -806,6 +869,7 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
@@ -816,9 +880,7 @@ export function useBatchDeleteIssues() {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Comments / Timeline
-// ---------------------------------------------------------------------------
 
 type TimelineCache = TimelineEntry[];
 
@@ -1091,9 +1153,7 @@ export function useToggleCommentReaction(issueId: string) {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Issue-level Reactions
-// ---------------------------------------------------------------------------
 
 export function useToggleIssueReaction(issueId: string) {
   const qc = useQueryClient();
@@ -1110,18 +1170,20 @@ export function useToggleIssueReaction(issueId: string) {
       }
       return api.addIssueReaction(issueId, emoji);
     },
-    onSuccess: (reaction) => {
-      onIssueAuxiliaryRevision(qc, wsId, issueId, reaction?.issue_revision);
+    onSuccess: (reaction, { existing }) => {
+      if (reaction) {
+        patchIssueReactions(qc, wsId, issueId, addReactionToList(reaction), reaction.issue_revision);
+      } else if (existing) {
+        patchIssueReactions(qc, wsId, issueId, removeReactionFromList(existing));
+      }
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
+    onError: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId), exact: true });
     },
   });
 }
 
-// ---------------------------------------------------------------------------
 // Issue Subscribers
-// ---------------------------------------------------------------------------
 
 export function useToggleIssueSubscriber(issueId: string) {
   const qc = useQueryClient();
@@ -1166,12 +1228,19 @@ export function useToggleIssueSubscriber(issueId: string) {
         qc.setQueryData<IssueSubscriber[]>(
           issueKeys.subscribers(issueId),
           (old) => {
+            // An explicit subscribe rewrites an existing row's reason to
+            // manual. The delivery tier is the server's to report, so it is
+            // dropped until onSettled refetches it.
             if (
               old?.some(
                 (s) => s.user_id === userId && s.user_type === userType,
               )
             )
-              return old;
+              return old.map((s) =>
+                s.user_id === userId && s.user_type === userType
+                  ? { ...s, reason: "manual" as const, delivery: undefined }
+                  : s,
+              );
             return [...(old ?? []), temp];
           },
         );
@@ -1182,8 +1251,10 @@ export function useToggleIssueSubscriber(issueId: string) {
       if (ctx?.prev)
         qc.setQueryData(issueKeys.subscribers(issueId), ctx.prev);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, { userType }) => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId && userType === "member") void refreshSubscribedIssues(qc, wsId);
     },
   });
 }
@@ -1206,8 +1277,10 @@ export function useUnsubscribeFromIssueSubtree(issueId: string) {
     }) => {
       await api.unsubscribeFromIssueSubtree(issueId, userId, userType);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, { userType }) => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+      const wsId = getCurrentWsId();
+      if (wsId && userType === "member") void refreshSubscribedIssues(qc, wsId);
     },
   });
 }
