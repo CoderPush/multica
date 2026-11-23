@@ -85,11 +85,11 @@ func TestRegisterListeners_DuplicateMarkReachesEachMemberAsTheyMayReadIt(t *test
 func TestRegisterListeners_DuplicateActivityReachesEachMemberAsTheyMayReadIt(t *testing.T) {
 	// Through the producer the activity log uses, which leaves the details
 	// whole for the fanout to project.
-	activity := func(issueID, action string, details map[string]string) *fakeBroadcaster {
+	activity := func(querier fakeAudienceQuerier, issueID, action string, details map[string]string) *fakeBroadcaster {
 		body, _ := json.Marshal(details)
 		bus := events.New()
 		fb := &fakeBroadcaster{}
-		registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{}))
+		registerListeners(bus, fb, newPrivateProjectAudience(querier))
 		publishActivityEvent(bus, events.Event{WorkspaceID: ppWorkspace}, db.ActivityLog{IssueID: ppUUID(issueID), Action: action, Details: body})
 		return fb
 	}
@@ -100,7 +100,7 @@ func TestRegisterListeners_DuplicateActivityReachesEachMemberAsTheyMayReadIt(t *
 	}
 
 	t.Run("original in a private project", func(t *testing.T) {
-		frames := framesByMember(t, activity(ppPublicIssue, "duplicate_marked",
+		frames := framesByMember(t, activity(fakeAudienceQuerier{}, ppPublicIssue, "duplicate_marked",
 			map[string]string{"original_id": ppSecretIssue, "original_identifier": "SECRET-1", "to": "cancelled"}))
 		for userID, visible := range map[string]bool{ppMember: true, ppShared: true, ppOther: false, ppPlain: false} {
 			d := details(frames[userID])
@@ -116,7 +116,7 @@ func TestRegisterListeners_DuplicateActivityReachesEachMemberAsTheyMayReadIt(t *
 	// Both issues in one private project: its whole audience keeps the
 	// reference, so a client appending the entry shows it.
 	t.Run("same private project", func(t *testing.T) {
-		frames := framesByMember(t, activity(ppSecretIssue, "duplicate_added",
+		frames := framesByMember(t, activity(fakeAudienceQuerier{}, ppSecretIssue, "duplicate_added",
 			map[string]string{"duplicate_id": ppSecretSibling, "duplicate_identifier": "SECRET-2"}))
 		if len(frames) != 2 {
 			t.Fatalf("delivered to %v, want the project's two members", frames)
@@ -130,18 +130,27 @@ func TestRegisterListeners_DuplicateActivityReachesEachMemberAsTheyMayReadIt(t *
 
 	// Who could see a deleted original went with its project: nobody keeps
 	// it, not even a member of every private project there is now.
-	t.Run("deleted original", func(t *testing.T) {
-		frames := framesByMember(t, activity(ppPublicIssue, "duplicate_unmarked",
-			map[string]string{"original_id": ppDeletedIssue, "original_identifier": "GONE-1", "reason": "original_deleted"}))
-		if len(frames) != 4 {
-			t.Fatalf("delivered to %d members, want the 4 non-guest members", len(frames))
-		}
-		for userID, p := range frames {
-			if d := details(p); d["original_id"] != "" || d["original_identifier"] != "" || d["reason"] != "original_deleted" {
-				t.Errorf("%s: details = %v, want the reference stripped and the reason kept", userID, d)
+	for _, tc := range []struct {
+		name              string
+		noPrivateProjects bool
+	}{
+		{name: "deleted original with private projects"},
+		{name: "deleted original without private projects", noPrivateProjects: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			querier := fakeAudienceQuerier{noPrivateProjects: tc.noPrivateProjects}
+			frames := framesByMember(t, activity(querier, ppPublicIssue, "duplicate_unmarked",
+				map[string]string{"original_id": ppDeletedIssue, "original_identifier": "GONE-1", "reason": "original_deleted"}))
+			if len(frames) != 4 {
+				t.Fatalf("delivered to %d members, want the 4 non-guest members", len(frames))
 			}
-		}
-	})
+			for userID, p := range frames {
+				if d := details(p); d["original_id"] != "" || d["original_identifier"] != "" || d["reason"] != "original_deleted" {
+					t.Errorf("%s: details = %v, want the reference stripped and the reason kept", userID, d)
+				}
+			}
+		})
+	}
 }
 
 // An edit that leaves the mark alone still names the original. Every client

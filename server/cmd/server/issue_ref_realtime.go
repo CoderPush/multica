@@ -121,10 +121,6 @@ func (a *dbPrivateProjectAudience) IssueRefReaders(ctx context.Context, e events
 	if !issueRefEvents[e.Type] || e.WorkspaceID == "" {
 		return nil, nil
 	}
-	ws, err := a.workspace(ctx, e.WorkspaceID)
-	if err != nil || len(ws.projects) == 0 {
-		return nil, err
-	}
 	var refs []string
 	visitIssueRefs(e.Type, jsonObject(e.Payload), false, func(id string) bool {
 		refs = append(refs, id)
@@ -132,6 +128,12 @@ func (a *dbPrivateProjectAudience) IssueRefReaders(ctx context.Context, e events
 	})
 	if len(refs) == 0 {
 		return nil, nil
+	}
+	// Deleted references still need checking when there are no private
+	// projects left in the workspace.
+	ws, err := a.workspace(ctx, e.WorkspaceID)
+	if err != nil {
+		return nil, err
 	}
 	var ids []pgtype.UUID
 	for _, ref := range refs {

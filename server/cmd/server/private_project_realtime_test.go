@@ -47,7 +47,8 @@ const (
 )
 
 type fakeAudienceQuerier struct {
-	fail bool
+	fail              bool
+	noPrivateProjects bool
 }
 
 func ppUUID(s string) pgtype.UUID {
@@ -61,6 +62,9 @@ func ppUUID(s string) pgtype.UUID {
 func (f fakeAudienceQuerier) ListPrivateProjectAudience(context.Context, pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error) {
 	if f.fail {
 		return nil, errors.New("db down")
+	}
+	if f.noPrivateProjects {
+		return nil, nil
 	}
 	// The audience is these rows and nothing else: nobody is added for their
 	// workspace role.
