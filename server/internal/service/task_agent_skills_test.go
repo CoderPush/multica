@@ -109,7 +109,7 @@ func (d *skillReadDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows
 func skillRow(id pgtype.UUID, name, description, content string) []any {
 	return []any{
 		id, testUUID(0xF0), name, description, content,
-		[]byte(nil), pgtype.UUID{}, pgtype.Timestamptz{}, pgtype.Timestamptz{}, pgtype.UUID{},
+		[]byte(nil), pgtype.UUID{}, pgtype.Timestamptz{}, pgtype.Timestamptz{}, pgtype.UUID{}, int64(1),
 	}
 }
 
@@ -230,7 +230,7 @@ func TestLoadAgentSkillBundles_FailsClosedOnReadFailure(t *testing.T) {
 	}
 	svc := &TaskService{Queries: db.New(fake)}
 
-	bundles, refs, err := svc.LoadAgentSkillBundles(context.Background(), testUUID(9), "")
+	bundles, refs, err := svc.LoadAgentSkillBundles(context.Background(), testUUID(9), "", false)
 	if err == nil {
 		t.Fatalf("LoadAgentSkillBundles returned nil error with %d bundles / %d refs", len(bundles), len(refs))
 	}

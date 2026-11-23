@@ -1,15 +1,24 @@
 "use client";
 
-import { useId, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   AlertCircle,
   Building2,
   Check,
+  ChevronRight,
   Eye,
+  Globe,
   Laptop,
   Loader2,
   UserRound,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { cn } from "@multica/ui/lib/utils";
@@ -27,6 +36,7 @@ export type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
  */
 export type SettingsScope =
   | "account"
+  | "all-workspaces"
   | "device"
   | "device-workspace"
   | "workspace"
@@ -45,14 +55,16 @@ export function SettingsScopeBadge({ scope }: { scope: SettingsScope }) {
   if (scope === "workspace" || scope === "workspace-only" || scope === "device-workspace") {
     return <WorkspaceScopeBadge scope={scope} />;
   }
-  const Icon = scope === "account" ? UserRound : Laptop;
+  const Icon = scope === "account" ? UserRound : scope === "all-workspaces" ? Globe : Laptop;
   return (
     <span data-slot="settings-scope" className={SCOPE_BADGE_CLASS}>
       <Icon aria-hidden="true" className="size-3" />
       <span className="truncate">
         {scope === "account"
           ? t(($) => $.layout.scope.account)
-          : t(($) => $.layout.scope.device)}
+          : scope === "all-workspaces"
+            ? t(($) => $.layout.scope.all_workspaces)
+            : t(($) => $.layout.scope.device)}
       </span>
     </span>
   );
@@ -74,7 +86,8 @@ function WorkspaceScopeBadge({
       <WorkspaceAvatar
         name={name}
         avatarUrl={workspace.avatar_url}
-        className="size-3 rounded-xs border-0"
+        radius="xs"
+        className="size-3 border-0"
       />
     ) : (
       <Building2 aria-hidden="true" className="size-3" />
@@ -93,6 +106,22 @@ function WorkspaceScopeBadge({
   );
 }
 
+/**
+ * The settings page's one header, as a set of slots the open tab fills. The
+ * page names the section itself, so it stays put while a tab loads; the tab
+ * contributes what only it knows — where its setting takes effect, its
+ * page-level actions, and the name of a detail page opened inside it.
+ */
+export interface SettingsHeaderSlots {
+  trail: HTMLElement | null;
+  meta: HTMLElement | null;
+  actions: HTMLElement | null;
+  /** Tells the page a detail is open, so the section name links back. */
+  onDetailChange: (open: boolean) => void;
+}
+
+export const SettingsHeaderContext = createContext<SettingsHeaderSlots | null>(null);
+
 export function SettingsTab({
   title,
   description,
@@ -104,12 +133,52 @@ export function SettingsTab({
   title: ReactNode;
   description?: ReactNode;
   scope?: SettingsScope;
-  /** Primary page-level action, aligned with the title. */
+  /** Page-level actions, at the right of the page header. */
   actions?: ReactNode;
-  /** Parent location for detail pages; rendered above the title. */
+  /**
+   * Parent location for detail pages. Inside the settings page the header
+   * shows the trail itself; standalone, this renders above the title.
+   */
   breadcrumb?: ReactNode;
   children: ReactNode;
 }) {
+  const header = useContext(SettingsHeaderContext);
+  const detail = breadcrumb != null && breadcrumb !== false;
+  const onDetailChange = header?.onDetailChange;
+  useEffect(() => {
+    if (!onDetailChange || !detail) return;
+    onDetailChange(true);
+    return () => onDetailChange(false);
+  }, [onDetailChange, detail]);
+
+  if (header) {
+    return (
+      <div className="space-y-8">
+        {header.trail && detail
+          ? createPortal(
+              <>
+                <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-faint-foreground" />
+                <span aria-current="page" className="min-w-0 truncate">
+                  {title}
+                </span>
+              </>,
+              header.trail,
+            )
+          : null}
+        {header.meta && scope
+          ? createPortal(<SettingsScopeBadge scope={scope} />, header.meta)
+          : null}
+        {header.actions && actions ? createPortal(actions, header.actions) : null}
+        {description ? (
+          <p className="max-w-2xl text-body leading-6 text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <header>

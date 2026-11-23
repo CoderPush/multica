@@ -76,11 +76,22 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
 
+		// A workflow handoff (MUL-7420) rides on the status row: entering the
+		// step is what moved the issue to its handler, so the timeline shows
+		// one entry and the separate assignee row would only repeat it.
+		handoff, _ := payload["workflow_handoff"].(map[string]string)
+		if statusChanged && handoff != nil {
+			assigneeChanged = false
+		}
+
 		if statusChanged {
 			prevStatus, _ := payload["prev_status"].(string)
 			detailsMap := map[string]string{
 				"from": prevStatus,
 				"to":   issue.Status,
+			}
+			for k, v := range handoff {
+				detailsMap["handoff_"+k] = v
 			}
 			// PR auto-complete (MUL-7429): say why the status moved, so the
 			// timeline explains the change without a hidden rule.
@@ -250,7 +261,9 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			}
 		}
 
-		if descriptionChanged {
+		if liveEditors, live := payload["description_live_editors"].([]handler.DocContributor); descriptionChanged && live {
+			recordLiveDescriptionActivities(ctx, bus, queries, e, issue, liveEditors)
+		} else if descriptionChanged {
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
@@ -320,6 +333,42 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 
 // publishActivityEvent sends an activity:created event for WS broadcasting.
 // Payload matches frontend ActivityCreatedPayload: { issue_id, entry: TimelineEntry }
+// recordLiveDescriptionActivities records a live editing session as one
+// description_updated entry per editor rather than one per autosave: an editor
+// who already has a live entry from the last half hour gets no new one.
+func recordLiveDescriptionActivities(ctx context.Context, bus *events.Bus, queries *db.Queries, e events.Event, issue handler.IssueResponse, editors []handler.DocContributor) {
+	for _, editor := range editors {
+		recent, err := queries.HasRecentLiveDescriptionActivity(ctx, db.HasRecentLiveDescriptionActivityParams{
+			IssueID:   parseUUID(issue.ID),
+			ActorType: util.StrToText(editor.Type),
+			ActorID:   parseUUID(editor.ID),
+		})
+		if err != nil {
+			slog.Error("activity: failed to check live description activity",
+				"issue_id", issue.ID, "error", err)
+			continue
+		}
+		if recent {
+			continue
+		}
+		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+			ID:          dbid.NewV7(),
+			WorkspaceID: parseUUID(issue.WorkspaceID),
+			IssueID:     parseUUID(issue.ID),
+			ActorType:   util.StrToText(editor.Type),
+			ActorID:     parseUUID(editor.ID),
+			Action:      "description_updated",
+			Details:     []byte(`{"live":"true"}`),
+		})
+		if err != nil {
+			slog.Error("activity: failed to record live description change",
+				"issue_id", issue.ID, "error", err)
+			continue
+		}
+		publishActivityEvent(bus, e, activity)
+	}
+}
+
 func publishActivityEvent(bus *events.Bus, original events.Event, activity db.ActivityLog) {
 	actorType := ""
 	if activity.ActorType.Valid {
@@ -339,7 +388,10 @@ func publishActivityEvent(bus *events.Bus, original events.Event, activity db.Ac
 				"actor_type": actorType,
 				"actor_id":   util.UUIDToString(activity.ActorID),
 				"action":     action,
-				"details":    json.RawMessage(activity.Details),
+				// Realtime fans out by this issue's audience, which need not
+				// see an issue the details name; clients refetch the timeline,
+				// where the reference is redacted per reader.
+				"details":    json.RawMessage(handler.StripActivityIssueRef(action, activity.Details)),
 				"created_at": util.TimestampToString(activity.CreatedAt),
 			},
 		},
