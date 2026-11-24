@@ -40,6 +40,7 @@ import type {
   WorkspaceFeatures,
   MemberLimit,
   StorageUsage,
+  AppCallUsage,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
@@ -1698,6 +1699,11 @@ export const CommentSubIssueTaskResponseSchema = z.object({
 }).loose();
 
 export const IssueSchema = z.object({
+  blocked_count: z.number().int().nonnegative().optional().catch(undefined),
+  blocked_by: z.array(z.object({
+    id: z.string(), identifier: z.string(), title: z.string(), status: z.string(),
+    via: z.string(), closed: z.boolean(),
+  })).optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string(),
   number: z.number(),
@@ -2269,6 +2275,12 @@ const DashboardUsageByAgentSchema = z.object({
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
+const DashboardUsageBySquadSchema = DashboardUsageByAgentSchema.extend({
+  squad_id: z.string().default(""),
+}).loose();
+
+export const DashboardUsageBySquadListSchema = z.array(DashboardUsageBySquadSchema);
+
 // `cancelled_count` defaults to 0 so an installed client pointed at a
 // backend that predates it still renders: those rows simply carry no
 // cancelled segment, which is exactly what that backend measured.
@@ -2282,6 +2294,12 @@ const DashboardAgentRunTimeSchema = z.object({
 }).loose();
 
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
+
+const DashboardSquadRunTimeSchema = DashboardAgentRunTimeSchema.extend({
+  squad_id: z.string().default(""),
+}).loose();
+
+export const DashboardSquadRunTimeListSchema = z.array(DashboardSquadRunTimeSchema);
 
 const DashboardRunTimeDailySchema = z.object({
   date: z.string().default(""),
@@ -2317,6 +2335,14 @@ const DashboardFailureByAgentSchema = z.object({
 
 export const DashboardFailureByAgentListSchema = z.array(
   DashboardFailureByAgentSchema,
+);
+
+const DashboardFailureBySquadSchema = DashboardFailureByAgentSchema.extend({
+  squad_id: z.string().default(""),
+}).loose();
+
+export const DashboardFailureBySquadListSchema = z.array(
+  DashboardFailureBySquadSchema,
 );
 
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
@@ -2512,6 +2538,8 @@ export const AgentTaskSchema = z.object({
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),
   autopilot_run_id: z.string().optional(),
+  squad_id: z.string().optional().catch(undefined),
+  is_leader_task: z.boolean().optional().catch(undefined),
   parent_task_id: z.string().optional(),
   attempt: z.number().optional(),
   trigger_comment_id: z.string().optional(),
@@ -2951,6 +2979,8 @@ export const SquadSchema = z.object({
   archived_by: z.string().nullable().optional().transform((v) => v ?? null),
   member_count: z.number().default(0),
   member_preview: z.array(SquadMemberPreviewSchema).default([]),
+  // Older backends predate handoff modes; they always routed through the leader.
+  handoff_mode: z.enum(["leader", "direct"]).catch("leader").default("leader"),
 }).loose();
 
 export const SquadListSchema = z.array(SquadSchema);
@@ -2970,6 +3000,7 @@ export const EMPTY_SQUAD: Squad = {
   archived_by: null,
   member_count: 0,
   member_preview: [],
+  handoff_mode: "leader",
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status
@@ -2996,6 +3027,18 @@ export const SquadMemberStatusListResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
+
+export const SquadBriefsResponseSchema = z.object({
+  handoff_mode: z.enum(["leader", "direct"]).catch("leader").default("leader"),
+  briefs: z.array(z.object({
+    member_type: z.string(),
+    member_id: z.string(),
+    is_leader: z.boolean().default(false),
+    brief: z.string().default(""),
+  }).loose()).default([]),
+}).loose();
+
+export const EMPTY_SQUAD_BRIEFS = { handoff_mode: "leader" as const, briefs: [] };
 
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
 //
@@ -3692,6 +3735,9 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
         // Newer than autopilot_runs: an older Cloud omits it, and a malformed
         // one only hides its own row.
         dashboard_history_days: WorkspaceEntitlementLimitSchema.nullable().catch(null).default(null),
+        // Newer still: an older Cloud omits it, and a malformed one only
+        // hides its own row.
+        app_tool_calls: WorkspaceEntitlementLimitSchema.nullable().catch(null).default(null),
       })
       .loose(),
     current_period_end: z.string().nullable().optional(),
@@ -3709,6 +3755,7 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
         autopilotRuns: value.limits.autopilot_runs,
         storageBytes: value.limits.storage_bytes ?? null,
         dashboardHistoryDays: value.limits.dashboard_history_days,
+        appToolCalls: value.limits.app_tool_calls,
       },
       currentPeriodEnd: value.current_period_end ?? null,
       snapshotExpiresAt: value.snapshot_expires_at ?? null,
@@ -4133,6 +4180,42 @@ export const StorageUsageSchema = z
             limitBytes: value.limit_bytes,
             reached:
               value.action === "enforce" && value.used_bytes !== null ? (value.reached ?? false) : null,
+          },
+  );
+
+// App call usage that cannot be read, or an action from a newer server, reads
+// as off: the gateway still checks every call. A malformed breakdown only
+// drops the breakdown.
+export const AppCallUsageSchema = z
+  .object({
+    action: z.enum(["off", "observe", "enforce"]).catch("off"),
+    used: z.number().int().nonnegative().nullable().catch(null).default(null),
+    limit: z.number().int().nonnegative().nullable().catch(null).default(null),
+    reached: z.boolean().nullable().catch(null).default(null),
+    reset_at: z.string().nullable().catch(null).default(null),
+    members: z
+      .array(
+        z.object({
+          user_id: z.string().nullable().catch(null).default(null),
+          calls: z.number().int().nonnegative(),
+        }),
+      )
+      .nullable()
+      .catch(null)
+      .default(null),
+  })
+  .loose()
+  .transform(
+    (value): AppCallUsage =>
+      value.action === "off" || value.limit === null || value.used === null
+        ? { action: "off", used: null, limit: null, reached: null, resetAt: null, members: [] }
+        : {
+            action: value.action,
+            used: value.used,
+            limit: value.limit,
+            reached: value.action === "enforce" ? (value.reached ?? value.used >= value.limit) : null,
+            resetAt: value.reset_at,
+            members: (value.members ?? []).map((m) => ({ userId: m.user_id, calls: m.calls })),
           },
   );
 

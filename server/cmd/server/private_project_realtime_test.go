@@ -47,7 +47,8 @@ const (
 )
 
 type fakeAudienceQuerier struct {
-	fail              bool
+	fail bool
+	// noPrivateProjects makes the workspace have no private project at all.
 	noPrivateProjects bool
 }
 
